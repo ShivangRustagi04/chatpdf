@@ -1,102 +1,95 @@
 import streamlit as st
-from PyPDF2 import PdfReader
+import json
+import pdfplumber
+from transformers import pipeline
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import os
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-import google.generativeai as genai
 from langchain.vectorstores import FAISS
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains.question_answering import load_qa_chain
-from langchain.prompts import PromptTemplate
-from dotenv import load_dotenv
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
-load_dotenv()
-os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-
-
+# ---------------------------
+# Step 1: Extract Text from PDF
+# ---------------------------
 def get_pdf_text(pdf_docs):
-    text=""
+    text = ""
     for pdf in pdf_docs:
-        pdf_reader= PdfReader(pdf)
-        for page in pdf_reader.pages:
-            text+= page.extract_text()
-    return  text
+        with pdfplumber.open(pdf) as pdf_reader:
+            for page_num, page in enumerate(pdf_reader.pages):
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+                else:
+                    text += f"\n[Warning: No extractable text found on page {page_num+1}]\n"
+    return text
 
-
-
+# ---------------------------
+# Step 2: Chunk Text
+# ---------------------------
 def get_text_chunks(text):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
     chunks = text_splitter.split_text(text)
     return chunks
 
-
+# ---------------------------
+# Step 3: Build Vector Store
+# ---------------------------
 def get_vector_store(text_chunks):
-    embeddings = GoogleGenerativeAIEmbeddings(model = "models/embedding-001")
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
     vector_store.save_local("faiss_index")
 
+    # Save chunks with metadata
+    with open("book_chunks.json", "w") as f:
+        json.dump([{"chunk": c} for c in text_chunks], f, indent=4)
 
-def get_conversational_chain():
-
-    prompt_template = """
-    Answer the question as detailed as possible from the provided context, make sure to provide all the details, if the answer is not in
-    provided context just say, "answer is not available in the context", don't provide the wrong answer\n\n
-    Context:\n {context}?\n
-    Question: \n{question}\n
-
-    Answer:
-    """
-
-    model = ChatGoogleGenerativeAI(model="gemini-pro",
-                             temperature=0.3)
-
-    prompt = PromptTemplate(template = prompt_template, input_variables = ["context", "question"])
-    chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
-
-    return chain
-
-
+# ---------------------------
+# Step 4: Summarization Model
+# ---------------------------
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
 def user_input(user_question):
-    embeddings = GoogleGenerativeAIEmbeddings(model = "models/embedding-001")
-    
-    new_db = FAISS.load_local("faiss_index", embeddings)
-    docs = new_db.similarity_search(user_question)
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
+    docs = db.similarity_search(user_question, k=3)
 
-    chain = get_conversational_chain()
+    # Combine retrieved chunks into one context
+    context = "\n".join([d.page_content for d in docs])
 
-    
-    response = chain(
-        {"input_documents":docs, "question": user_question}
-        , return_only_outputs=True)
+    # Generate summarized answer
+    try:
+        summary = summarizer(context, max_length=150, min_length=30, do_sample=False)
+        answer = summary[0]["summary_text"]
+    except Exception:
+        answer = "Answer not found in the book."
 
-    print(response)
-    st.write("Reply: ", response["output_text"])
+    # Display in UI
+    st.subheader("Answer")
+    st.write(answer)
 
+    st.subheader("Relevant Book Chunks")
+    for i, d in enumerate(docs):
+        st.write(f"**Chunk {i+1}:** {d.page_content[:500]}...")
 
-
-
+# ---------------------------
+# Step 5: Streamlit App
+# ---------------------------
 def main():
-    st.set_page_config("Chat PDF")
-    st.header("Chat with PDF using Gemini💁")
+    st.set_page_config("Book QA System")
+    st.header("📖 RAG QA System (Book-based with Summarization)")
 
-    user_question = st.text_input("Ask a Question from the PDF Files")
+    user_question = st.text_input("Ask a question from the book:")
 
     if user_question:
         user_input(user_question)
 
     with st.sidebar:
-        st.title("Menu:")
-        pdf_docs = st.file_uploader("Upload your PDF Files and Click on the Submit & Process Button", accept_multiple_files=True)
+        st.title("Menu")
+        pdf_docs = st.file_uploader("Upload the Book (PDF)", accept_multiple_files=True)
         if st.button("Submit & Process"):
-            with st.spinner("Processing..."):
+            with st.spinner("Processing book..."):
                 raw_text = get_pdf_text(pdf_docs)
                 text_chunks = get_text_chunks(raw_text)
                 get_vector_store(text_chunks)
-                st.success("Done")
-
-
+                st.success("Book processed successfully!")
 
 if __name__ == "__main__":
     main()
