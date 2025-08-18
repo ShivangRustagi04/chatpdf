@@ -41,7 +41,7 @@ live link - http://0198bdb9-65b2-e341-0067-5746e637d873.share.connect.posit.clou
 
 
 
-**Sample Input and Output:**
+## Sample Input and Output:
 
 1. what is ecosystem?
 answer = An ecosystem can be visualised as a functional unit of 12.2.Productivity nature, where living organisms interact among themselves and also with the surrounding physical environment. Ecosystem varies greatly in size from a small pond to a large forest or a sea. Many ecologists regard the entire 12.4 Energy Flow biosphere as a global ecosystem, as a composite of all local ecosystems on Earth.
@@ -57,6 +57,11 @@ answer = Dead plant remains such as leaves, bark, flowers and dead remains of an
 
 5. what are producers?
 answer = The green plant in the ecosystem are called producers. In a terrestrial ecosystem, major producers are herbaceous and woody plants. Producers in an aquatic ecosystem are various species like phytoplankton, algae and higher plants. Starting from the plants (or producers) food chains or rather webs are formed such that an animal feeds on a plant or on another animal and in turn is food for another.
+## Setup & Installation Instructions
+1. Open the streamlit app or directly go to live link mentioned in Setup and & Installation
+2. Upload PDFs and Process
+3. Ask Questions
+
 ## ⚠️ Limitations & Security Compliance
 
 File Size: Large PDF files (>50MB) may slow down processing or exceed memory limits.
