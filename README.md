@@ -28,8 +28,13 @@ pip install -r requirements.txt
 3. **Run the app locally:**
 ```bash
 streamlit run app.py
-```
 
+OR 
+
+run live:-
+
+live link - https://chatwithyourpdffreely.streamlit.app/
+```
 
 ## ⚠️ Limitations & Security Compliance
 
