@@ -53,6 +53,27 @@ def load_summarizer():
 
 summarizer = load_summarizer()
 
+def is_question_relevant(question, context):
+    """
+    Check if the retrieved context is actually relevant to the question.
+    This is a simple implementation that could be enhanced with more sophisticated NLP.
+    """
+    question_lower = question.lower()
+    context_lower = context.lower()
+    
+    # Check if key question words appear in the context
+    question_words = set(question_lower.split())
+    context_words = set(context_lower.split())
+    
+    # Count how many question words appear in the context
+    matching_words = question_words.intersection(context_words)
+    
+    # If less than 30% of question words appear in context, consider it irrelevant
+    if len(question_words) > 0 and len(matching_words) / len(question_words) < 0.3:
+        return False
+    
+    return True
+
 def user_input(user_question):
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     try:
@@ -71,6 +92,12 @@ def user_input(user_question):
 
     # Create context from retrieved docs
     context = "\n".join([d.page_content for d in docs])
+    
+    # Check if the retrieved content is actually relevant to the question
+    if not is_question_relevant(user_question, context):
+        st.info("I'm sorry, but this question doesn't seem to be covered in the book content. Please ask a question related to the PDF content.")
+        return
+
     try:
         summary = summarizer(context, max_length=150, min_length=30, do_sample=False)
         answer = summary[0]["summary_text"]
