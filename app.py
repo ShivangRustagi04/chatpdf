@@ -63,10 +63,10 @@ sentence_model = load_sentence_transformer()
 
 def is_question_relevant(question, context):
     """
-    Enhanced relevance checking using semantic similarity and keyword analysis
+    Balanced relevance checking with adjustable thresholds
     """
     # If context is too short, it's likely not relevant
-    if len(context) < 50:
+    if len(context) < 30:
         return False
     
     # Calculate semantic similarity
@@ -74,26 +74,33 @@ def is_question_relevant(question, context):
     context_embedding = sentence_model.encode([context])
     similarity_score = cosine_similarity(question_embedding, context_embedding)[0][0]
     
-    # Check for keyword matches with more strict criteria
+    # Check for keyword matches
     question_lower = question.lower()
     context_lower = context.lower()
     
     # Extract meaningful keywords (excluding common words)
-    stop_words = {'what', 'is', 'the', 'a', 'an', 'how', 'why', 'when', 'where', 'who'}
+    stop_words = {'what', 'is', 'the', 'a', 'an', 'how', 'why', 'when', 'where', 'who', 'does', 'do'}
     question_keywords = [word for word in question_lower.split() if word not in stop_words and len(word) > 2]
     
+    # If no specific keywords, be more lenient
+    if not question_keywords:
+        return similarity_score > 0.3
+    
     # Count how many question keywords appear in context
-    if question_keywords:
-        matching_keywords = sum(1 for keyword in question_keywords if keyword in context_lower)
-        keyword_ratio = matching_keywords / len(question_keywords)
-    else:
-        keyword_ratio = 0
+    matching_keywords = sum(1 for keyword in question_keywords if keyword in context_lower)
+    keyword_ratio = matching_keywords / len(question_keywords)
     
     # Combined relevance score (weighted average)
-    relevance_score = 0.7 * similarity_score + 0.3 * keyword_ratio
+    relevance_score = 0.6 * similarity_score + 0.4 * keyword_ratio
     
-    # Set a higher threshold for relevance
-    return relevance_score > 0.5
+    # Adjust threshold based on question type
+    threshold = 0.35  # Lowered threshold to be more inclusive
+    
+    # For definition questions (what is X), be more lenient
+    if question_lower.startswith(('what is', 'what are', 'define')):
+        threshold = 0.25
+    
+    return relevance_score > threshold
 
 def user_input(user_question):
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
@@ -103,7 +110,13 @@ def user_input(user_question):
         st.error("FAISS index not found. Please process a book first.")
         return
 
+    # First try a direct search
     docs = db.similarity_search(user_question, k=3)
+    
+    # If no good results, try with a broader search
+    if not docs or all(len(d.page_content) < 50 for d in docs):
+        docs = db.similarity_search(user_question, k=5)
+    
     if not docs:
         st.info("No relevant content found in the book for this question.")
         return
@@ -113,17 +126,26 @@ def user_input(user_question):
     
     # Check if the retrieved content is actually relevant to the question
     if not is_question_relevant(user_question, context):
-        st.info("I'm sorry, but this question doesn't seem to be covered in the book content. Please ask a question related to the PDF content.")
-        return
+        # Give one more chance with a different approach
+        alternative_docs = db.similarity_search(" ".join(user_question.split()[-2:]), k=3)  # Search on last two words
+        alternative_context = "\n".join([d.page_content for d in alternative_docs])
+        
+        if not is_question_relevant(user_question, alternative_context):
+            st.info("I'm sorry, but this question doesn't seem to be covered in the book content. Please ask a question related to the PDF content.")
+            return
+        else:
+            # Use the alternative context if it's relevant
+            context = alternative_context
+            docs = alternative_docs
 
     try:
         summary = summarizer(context, max_length=150, min_length=30, do_sample=False)
         answer = summary[0]["summary_text"]
         
-        # Final verification - check if the answer itself is relevant to the question
+        # Final verification - but be more lenient here
         if not is_question_relevant(user_question, answer):
-            st.info("I'm sorry, but this question doesn't seem to be covered in the book content. Please ask a question related to the PDF content.")
-            return
+            # Even if the answer doesn't perfectly match, show it if the context was relevant
+            st.warning("The book may not have a direct answer to your question, but here's some related information:")
             
     except Exception:
         answer = "Answer not found in the book."
