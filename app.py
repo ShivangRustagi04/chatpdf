@@ -60,21 +60,30 @@ def user_input(user_question):
     except Exception:
         st.error("FAISS index not found. Please process a book first.")
         return
+
     docs = db.similarity_search(user_question, k=3)
     if not docs:
         st.info("No relevant content found in the book for this question.")
         return
+
+    # Collect pages for final answer
+    pages_used = sorted(set([d.metadata.get("page", "N/A") for d in docs]))
+
+    # Create context from retrieved docs
     context = "\n".join([d.page_content for d in docs])
     try:
         summary = summarizer(context, max_length=150, min_length=30, do_sample=False)
         answer = summary[0]["summary_text"]
     except Exception:
         answer = "Answer not found in the book."
+
     st.subheader("Answer")
-    st.write(answer)
-    st.subheader("Relevant Book Chunks")
+    st.write(f"{answer}\n\n📄 (Derived from page(s): {', '.join(map(str, pages_used))})")
+
+    st.subheader("Relevant Book Chunks with Page Numbers")
     for i, d in enumerate(docs):
-        st.write(f"**Chunk {i+1}:** {d.page_content[:500]}...")
+        st.write(f"**Chunk {i+1} (Page {d.metadata.get('page', 'N/A')}):** {d.page_content[:500]}...")
+
 
 def main():
     st.set_page_config(page_title="Book QA System")
