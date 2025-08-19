@@ -6,6 +6,9 @@ from transformers import pipeline
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
 
 def get_pdf_text(pdf_docs):
     text = ""
@@ -51,28 +54,46 @@ def get_vector_store(text_chunks):
 def load_summarizer():
     return pipeline("summarization", model="facebook/bart-large-cnn")
 
+@st.cache_resource
+def load_sentence_transformer():
+    return SentenceTransformer('all-MiniLM-L6-v2')
+
 summarizer = load_summarizer()
+sentence_model = load_sentence_transformer()
 
 def is_question_relevant(question, context):
     """
-    Check if the retrieved context is actually relevant to the question.
-    This is a simple implementation that could be enhanced with more sophisticated NLP.
+    Enhanced relevance checking using semantic similarity and keyword analysis
     """
+    # If context is too short, it's likely not relevant
+    if len(context) < 50:
+        return False
+    
+    # Calculate semantic similarity
+    question_embedding = sentence_model.encode([question])
+    context_embedding = sentence_model.encode([context])
+    similarity_score = cosine_similarity(question_embedding, context_embedding)[0][0]
+    
+    # Check for keyword matches with more strict criteria
     question_lower = question.lower()
     context_lower = context.lower()
     
-    # Check if key question words appear in the context
-    question_words = set(question_lower.split())
-    context_words = set(context_lower.split())
+    # Extract meaningful keywords (excluding common words)
+    stop_words = {'what', 'is', 'the', 'a', 'an', 'how', 'why', 'when', 'where', 'who'}
+    question_keywords = [word for word in question_lower.split() if word not in stop_words and len(word) > 2]
     
-    # Count how many question words appear in the context
-    matching_words = question_words.intersection(context_words)
+    # Count how many question keywords appear in context
+    if question_keywords:
+        matching_keywords = sum(1 for keyword in question_keywords if keyword in context_lower)
+        keyword_ratio = matching_keywords / len(question_keywords)
+    else:
+        keyword_ratio = 0
     
-    # If less than 30% of question words appear in context, consider it irrelevant
-    if len(question_words) > 0 and len(matching_words) / len(question_words) < 0.3:
-        return False
+    # Combined relevance score (weighted average)
+    relevance_score = 0.7 * similarity_score + 0.3 * keyword_ratio
     
-    return True
+    # Set a higher threshold for relevance
+    return relevance_score > 0.5
 
 def user_input(user_question):
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
@@ -87,9 +108,6 @@ def user_input(user_question):
         st.info("No relevant content found in the book for this question.")
         return
 
-    # Collect pages for final answer
-    pages_used = sorted(set([d.metadata.get("page", "N/A") for d in docs]))
-
     # Create context from retrieved docs
     context = "\n".join([d.page_content for d in docs])
     
@@ -101,8 +119,17 @@ def user_input(user_question):
     try:
         summary = summarizer(context, max_length=150, min_length=30, do_sample=False)
         answer = summary[0]["summary_text"]
+        
+        # Final verification - check if the answer itself is relevant to the question
+        if not is_question_relevant(user_question, answer):
+            st.info("I'm sorry, but this question doesn't seem to be covered in the book content. Please ask a question related to the PDF content.")
+            return
+            
     except Exception:
         answer = "Answer not found in the book."
+
+    # Collect pages for final answer
+    pages_used = sorted(set([d.metadata.get("page", "N/A") for d in docs]))
 
     st.subheader("Answer")
     st.write(f"{answer}\n\n📄 (Derived from page(s): {', '.join(map(str, pages_used))})")
