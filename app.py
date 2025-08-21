@@ -156,9 +156,7 @@ def user_input(user_question):
     st.subheader("Answer")
     st.write(f"{answer}\n\n📄 (Derived from page(s): {', '.join(map(str, pages_used))})")
 
-    st.subheader("Relevant Book Chunks with Page Numbers")
-    for i, d in enumerate(docs):
-        st.write(f"**Chunk {i+1} (Page {d.metadata.get('page', 'N/A')}):** {d.page_content[:500]}...")
+
 
 
 def main():
